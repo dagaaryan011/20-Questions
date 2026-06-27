@@ -3,12 +3,11 @@ from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
-import torch.nn.functional as F
 import faiss
+from fastembed import TextEmbedding
 from groq import Groq
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 PDF_PATH = PROJECT_ROOT / "files" / "gullivers-travels.pdf.pdf"
@@ -24,7 +23,7 @@ SYSTEM_PROMPT = (
 )
 
 _groq_client: Groq | None = None
-_embedding_model: SentenceTransformer | None = None
+_embedding_model: TextEmbedding | None = None
 _chunks: List[str] = []
 _vectorstore: faiss.IndexFlatL2 | None = None
 _sessions: Dict[str, List[dict]] = {}
@@ -38,19 +37,14 @@ def _get_groq_client() -> Groq:
 
 
 def _embed(texts: List[str]) -> np.ndarray:
-    embeddings = _embedding_model.encode(texts, convert_to_tensor=True)
-    embeddings = F.layer_norm(embeddings, normalized_shape=(embeddings.shape[1],))
-    embeddings = F.normalize(embeddings, p=2, dim=1)
-    return embeddings.cpu().detach().numpy()
+    return np.array(list(_embedding_model.embed(texts)))
 
 
 def build_index(pdf_path: Path = PDF_PATH) -> None:
     global _embedding_model, _chunks, _vectorstore
 
     print("Initializing embeddings...")
-    _embedding_model = SentenceTransformer(
-        "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True
-    )
+    _embedding_model = TextEmbedding("BAAI/bge-small-en-v1.5")
 
     print(f"Loading PDF from: {pdf_path}")
     loader = PyPDFLoader(str(pdf_path))
@@ -63,16 +57,14 @@ def build_index(pdf_path: Path = PDF_PATH) -> None:
     _chunks = [doc.page_content for doc in docs]
     print(f"Split document into {len(_chunks)} chunks")
 
-    document_texts = ["search_document: " + c for c in _chunks]
-    embeddings_np = _embed(document_texts)
-
+    embeddings_np = _embed(_chunks)
     _vectorstore = faiss.IndexFlatL2(embeddings_np.shape[1])
     _vectorstore.add(embeddings_np)
     print("Vectorstore created with FAISS.")
 
 
 def _retrieve(query: str, k: int = 3) -> List[str]:
-    query_embedding = _embed(["search_query: " + query])
+    query_embedding = _embed([query])
     _, indices = _vectorstore.search(query_embedding, k=k)
     return [_chunks[i] for i in indices[0]]
 
