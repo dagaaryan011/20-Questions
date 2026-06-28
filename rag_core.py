@@ -6,8 +6,7 @@ import numpy as np
 import faiss
 from fastembed import TextEmbedding
 from groq import Groq
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 PDF_PATH = PROJECT_ROOT / "files" / "gullivers-travels.pdf.pdf"
@@ -47,14 +46,10 @@ def build_index(pdf_path: Path = PDF_PATH) -> None:
     _embedding_model = TextEmbedding("BAAI/bge-small-en-v1.5")
 
     print(f"Loading PDF from: {pdf_path}")
-    loader = PyPDFLoader(str(pdf_path))
-    pages = loader.load()
+    text = "\n".join(p.extract_text() or "" for p in PdfReader(str(pdf_path)).pages)
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, chunk_overlap=100, length_function=len
-    )
-    docs = text_splitter.split_documents(pages)
-    _chunks = [doc.page_content for doc in docs]
+    size, overlap = 1000, 100
+    _chunks = [text[i:i + size] for i in range(0, len(text), size - overlap)]
     print(f"Split document into {len(_chunks)} chunks")
 
     embeddings_np = _embed(_chunks)
